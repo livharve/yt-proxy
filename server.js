@@ -29,6 +29,8 @@ app.use((req, res, next) => {
   next();
 });
 
+app.get('/health', (req, res) => res.send('ok'));
+
 // GET /?action=tracks&v=VIDEO_ID
 // GET /?url=CAPTION_URL
 app.get('/', async (req, res) => {
