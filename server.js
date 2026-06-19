@@ -165,19 +165,19 @@ async function fetchTracksViaPiped(videoId) {
 }
 
 async function fetchTracksViaYtDlp(videoId) {
+  const { execFile } = require('child_process');
+  const { promisify } = require('util');
+  const execFileAsync = promisify(execFile);
   try {
-    const youtubeDl = require('youtube-dl-exec');
-    const data = await youtubeDl(`https://www.youtube.com/watch?v=${videoId}`, {
-      dumpSingleJson: true,
-      skipDownload: true,
-      noPlaylist: true,
-      noWarnings: true,
-      extractorRetries: 1,
-    });
+    const { stdout } = await execFileAsync('yt-dlp', [
+      '--dump-single-json', '--skip-download', '--no-playlist',
+      '--no-warnings', '--extractor-retries', '1',
+      `https://www.youtube.com/watch?v=${videoId}`,
+    ], { timeout: 30000 });
 
+    const data = JSON.parse(stdout);
     const tracks = [];
 
-    // Manual subtitles first
     if (data.subtitles) {
       for (const [langCode, formats] of Object.entries(data.subtitles)) {
         const fmt = formats.find(f => f.ext === 'vtt' || f.ext === 'xml') || formats[0];
@@ -185,10 +185,9 @@ async function fetchTracksViaYtDlp(videoId) {
       }
     }
 
-    // Auto-generated if no manual
     if (!tracks.length && data.automatic_captions) {
       for (const [langCode, formats] of Object.entries(data.automatic_captions)) {
-        if (!langCode.startsWith('en')) continue; // prefer English auto-caps first
+        if (!langCode.startsWith('en')) continue;
         const fmt = formats.find(f => f.ext === 'vtt') || formats[0];
         if (fmt?.url) tracks.push({ langCode, langName: (fmt.name || langCode) + ' (auto)', kind: 'asr', baseUrl: fmt.url });
       }
