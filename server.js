@@ -66,7 +66,9 @@ async function handleTracks(videoId, res) {
 async function fetchTracks(videoId) {
   const r = await fetchTracksInnerTube(videoId);
   if (!r.error) return r;
-  return fetchTracksViaPiped(videoId);
+  const p = await fetchTracksViaPiped(videoId);
+  if (!p.error) return p;
+  return fetchTracksViaYtDlp(videoId);
 }
 
 async function fetchTracksInnerTube(videoId) {
@@ -160,6 +162,49 @@ async function fetchTracksViaPiped(videoId) {
     } catch (_) { continue; }
   }
   return { error: 'rate_limited' };
+}
+
+async function fetchTracksViaYtDlp(videoId) {
+  try {
+    const youtubeDl = require('youtube-dl-exec');
+    const data = await youtubeDl(`https://www.youtube.com/watch?v=${videoId}`, {
+      dumpSingleJson: true,
+      skipDownload: true,
+      noPlaylist: true,
+      noWarnings: true,
+      extractorRetries: 1,
+    });
+
+    const tracks = [];
+
+    // Manual subtitles first
+    if (data.subtitles) {
+      for (const [langCode, formats] of Object.entries(data.subtitles)) {
+        const fmt = formats.find(f => f.ext === 'vtt' || f.ext === 'xml') || formats[0];
+        if (fmt?.url) tracks.push({ langCode, langName: fmt.name || langCode, kind: '', baseUrl: fmt.url });
+      }
+    }
+
+    // Auto-generated if no manual
+    if (!tracks.length && data.automatic_captions) {
+      for (const [langCode, formats] of Object.entries(data.automatic_captions)) {
+        if (!langCode.startsWith('en')) continue; // prefer English auto-caps first
+        const fmt = formats.find(f => f.ext === 'vtt') || formats[0];
+        if (fmt?.url) tracks.push({ langCode, langName: (fmt.name || langCode) + ' (auto)', kind: 'asr', baseUrl: fmt.url });
+      }
+      if (!tracks.length) {
+        for (const [langCode, formats] of Object.entries(data.automatic_captions)) {
+          const fmt = formats.find(f => f.ext === 'vtt') || formats[0];
+          if (fmt?.url) tracks.push({ langCode, langName: (fmt.name || langCode) + ' (auto)', kind: 'asr', baseUrl: fmt.url });
+        }
+      }
+    }
+
+    if (!tracks.length) return { error: 'no_captions' };
+    return { title: data.title || '', tracks };
+  } catch (_) {
+    return { error: 'rate_limited' };
+  }
 }
 
 // ── Proxy ─────────────────────────────────────────────────────────────────────
