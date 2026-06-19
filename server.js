@@ -64,11 +64,12 @@ async function handleTracks(videoId, res) {
 }
 
 async function fetchTracks(videoId) {
-  const r = await fetchTracksInnerTube(videoId);
+  // yt-dlp first — InnerTube/Piped are blocked from cloud IPs
+  const r = await fetchTracksViaYtDlp(videoId);
   if (!r.error) return r;
-  const p = await fetchTracksViaPiped(videoId);
-  if (!p.error) return p;
-  return fetchTracksViaYtDlp(videoId);
+  const it = await fetchTracksInnerTube(videoId);
+  if (!it.error) return it;
+  return fetchTracksViaPiped(videoId);
 }
 
 async function fetchTracksInnerTube(videoId) {
