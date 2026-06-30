@@ -474,9 +474,6 @@ app.get('/yt-mp3', async (req, res) => {
   if (duration === 0) {
     return res.status(400).json({ error: 'Live streams cannot be downloaded.' });
   }
-  if (duration > 1800) {
-    return res.status(400).json({ error: `Video is too long (${Math.round(duration / 60)} min). Maximum 30 minutes.` });
-  }
 
   // Step 2: download audio as MP3 to temp file
   const tmpId = crypto.randomBytes(8).toString('hex');
@@ -489,7 +486,7 @@ app.get('/yt-mp3', async (req, res) => {
       '--no-playlist', '--no-warnings',
       '-o', tmpBase + '.%(ext)s',
       rawUrl,
-    ], { timeout: 100000 });
+    ], { timeout: 300000 });
   } catch (e) {
     fsP.unlink(tmpMp3).catch(() => {});
     return res.status(502).json({ error: 'Audio download failed. YouTube may have restricted this video.' });
