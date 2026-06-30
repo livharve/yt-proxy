@@ -511,6 +511,71 @@ app.get('/yt-mp3', async (req, res) => {
   req.on('close', () => { stream.destroy(); cleanup(); });
 });
 
+// ── YouTube MP4 Download ──────────────────────────────────────────────────────
+
+app.get('/yt-mp4', async (req, res) => {
+  const rawUrl = (req.query.url || '').trim();
+  if (!YT_URL_RE.test(rawUrl)) return res.status(400).json({ error: 'Invalid YouTube URL.' });
+
+  const ALLOWED_Q = [360, 480, 720];
+  const q = ALLOWED_Q.includes(parseInt(req.query.quality)) ? parseInt(req.query.quality) : 720;
+
+  const { execFile } = require('child_process');
+  const { promisify } = require('util');
+  const fs = require('fs');
+  const fsP = require('fs').promises;
+  const os = require('os');
+  const path = require('path');
+  const crypto = require('crypto');
+  const execFileAsync = promisify(execFile);
+
+  let title = 'video', duration = 0;
+  try {
+    const { stdout } = await execFileAsync('yt-dlp', [
+      '--dump-single-json', '--skip-download', '--no-playlist', '--no-warnings', rawUrl,
+    ], { timeout: 30000 });
+    const info = JSON.parse(stdout);
+    title = (info.title || 'video').replace(/[<>:"/\\|?*\x00-\x1f]/g, ' ').trim() || 'video';
+    duration = typeof info.duration === 'number' ? info.duration : 0;
+  } catch (e) {
+    return res.status(502).json({ error: 'Could not fetch video info. The video may be private or unavailable.' });
+  }
+  if (duration === 0) return res.status(400).json({ error: 'Live streams cannot be downloaded.' });
+
+  const tmpId = crypto.randomBytes(8).toString('hex');
+  const tmpBase = path.join(os.tmpdir(), 'ytmp4-' + tmpId);
+  const tmpMp4 = tmpBase + '.mp4';
+
+  try {
+    await execFileAsync('yt-dlp', [
+      '-f', `bestvideo[height<=${q}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${q}]+bestaudio/best[height<=${q}]`,
+      '--merge-output-format', 'mp4',
+      '--no-playlist', '--no-warnings',
+      '-o', tmpBase + '.%(ext)s',
+      rawUrl,
+    ], { timeout: 300000 });
+  } catch (e) {
+    fsP.unlink(tmpMp4).catch(() => {});
+    return res.status(502).json({ error: 'Video download failed. YouTube may have restricted this video.' });
+  }
+
+  try { await fsP.access(tmpMp4); } catch {
+    return res.status(502).json({ error: 'MP4 conversion failed.' });
+  }
+
+  const safeFilename = encodeURIComponent(title + '.mp4');
+  res.setHeader('Content-Type', 'video/mp4');
+  res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${safeFilename}`);
+  res.setHeader('Cache-Control', 'no-store');
+
+  const stream = fs.createReadStream(tmpMp4);
+  stream.pipe(res);
+  const cleanup = () => fsP.unlink(tmpMp4).catch(() => {});
+  stream.on('end', cleanup);
+  stream.on('error', () => { cleanup(); if (!res.headersSent) res.status(500).json({ error: 'Stream error.' }); });
+  req.on('close', () => { stream.destroy(); cleanup(); });
+});
+
 app.get('/', async (req, res) => {
   const { action, v, url } = req.query;
   if (action === 'tracks') {
